@@ -8,7 +8,7 @@ import tensorflow as tf
 import reader
 
 DATA_PATH = "simple-examples/data"  # 数据存放的路径。
-HIDDEN_SIZE = 200          # 隐藏层规模。
+HIDDEN_SIZE = 200          # 隐藏层规模。这里等同于embedding size
 NUM_LAYERS = 2              # 深层循环神经网络中LSTM结构的层数,dRNN。
 VOCAB_SIZE = 10000         # 词典规模，加上语句结束标识符和稀有
                               # 单词标识符总共一万个单词。
