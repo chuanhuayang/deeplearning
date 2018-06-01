@@ -127,5 +127,4 @@ def process(input_path, output_path):
 
 
 if __name__ =="__main__":
-  # process("data/test.txt", "data/test_labeled.txt")
   process(sys.argv[1], sys.argv[2])
