@@ -28,9 +28,8 @@ tf.flags.DEFINE_integer("num_epochs", 100, "Number of training epochs (default: 
 tf.flags.DEFINE_integer("checkpoint_every", 100, "Save model after this many steps (default: 100)")
 
 #path
-tf.flags.DEFINE_string("train_path", "./data/train_segment.txt", "Training data path a folder")
-tf.flags.DEFINE_string("valid_path", "./data/valid_segment.txt", "Valid data path a folder")
-tf.flags.DEFINE_string("test_path", "./data/test_segment.txt", "Test data path a folder")
+tf.flags.DEFINE_string("train_path", "./data/atec_nlp_sim_segment_train.csv", "Training data path a folder")
+tf.flags.DEFINE_string("valid_path", "./data/atec_nlp_sim_segment_valid.csv", "Valid data path a folder")
 tf.flags.DEFINE_string("word_to_index_path", "wv/5000w_word_to_index_50.pkl", "word to index path")
 tf.flags.DEFINE_string("index_to_vector_path", "wv/5000w_index_to_vector_50.pkl", "index to vector path")
 
@@ -39,11 +38,11 @@ tf.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft device 
 tf.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
 
 #embedding
-tf.flags.DEFINE_boolean('if_emb_train', False, 'If word embedding trainable')
-tf.flags.DEFINE_boolean('if_emb', True, 'If use pre-trained word vectors')
+tf.flags.DEFINE_boolean('if_emb_train', True, 'If word embedding trainable')
+tf.flags.DEFINE_boolean('if_emb', False, 'If use pre-trained word vectors')
 
 #gpu
-tf.flags.DEFINE_string("gpu_id", '3', 'visible gpu for training')
+tf.flags.DEFINE_string("gpu_id", '0', 'visible gpu for training')
 
 FLAGS = tf.flags.FLAGS
 FLAGS._parse_flags()
@@ -75,34 +74,33 @@ def load_data(path, word_to_index):
   with codecs.open(path, "r", "utf-8") as inf:
     for line in inf:
       sentences = map(lambda x: x.split(), line.strip().split(sep))
-      if len(sentences) < 3:
+      if len(sentences) < 4:
         continue
-      token_context = map(lambda x: word_to_index[x] if x in word_to_index else 1, sentences[0])
+      # sentence[0] is id
+      token_context = map(lambda x: word_to_index[x] if x in word_to_index else 1, sentences[1])
       padded_token_context = sequence.pad_sequences([token_context], maxlen=FLAGS.sequence_length, padding='post', truncating='post', value=0)[0]
 
-      token_uttrance = map(lambda x: word_to_index[x] if x in word_to_index else 1, sentences[1])
+      token_uttrance = map(lambda x: word_to_index[x] if x in word_to_index else 1, sentences[2])
       padded_token_uttrance = sequence.pad_sequences([token_uttrance], maxlen=FLAGS.sequence_length, padding='post', truncating='post', value=0)[0]
       lengths = [len(token_context), len(token_uttrance)]
-      label = int(sentences[2][0])
+      label = int(sentences[3][0])
       data.append([padded_token_context, padded_token_uttrance, lengths, [label]])
   return data
 
 
 def main(_):
   print 'loading word_to_index ...'
-  word_to_index = pickle.load(open(FLAGS.word_to_index_path))
-  # word_to_index = {u"你好":0, u"晚安":1}
+  # word_to_index = pickle.load(open(FLAGS.word_to_index_path))
+  word_to_index = {u"你好":0, u"晚安":1}
   vocab_size = len(word_to_index)
   print 'size of the vocab is', vocab_size
   with tf.Graph().as_default():
-    # data_model = DataModel(vocab_size, FLAGS.embedding_dim, FLAGS.if_emb_train, FLAGS.rnn_dim, FLAGS.sequence_length, FLAGS.learning_rate)
     data_model = DataModel(vocab_size, FLAGS.embedding_dim, FLAGS.if_emb_train, FLAGS.rnn_dim, FLAGS.sequence_length, FLAGS.learning_rate, FLAGS.delta)
     sess = tf.Session()
-    saver = tf.train.Saver(max_to_keep=40)
+    saver = tf.train.Saver(max_to_keep=0)
     print 'initializing global and local variables ...'
     sess.run(tf.global_variables_initializer())
     sess.run(tf.local_variables_initializer())
-
     with open('./Model/model' + path_suf + '/' + 'parameters', 'aw') as otf:
       total_parameters = 0
       for variable in data_model.trainable_variables:
@@ -183,43 +181,43 @@ def main(_):
           file_path = model_path + "_" + time.strftime("%H_%M_%S", time.localtime())
           save_path = saver.save(sess, file_path, global_step=step)
           print "Model saved in file: %s" % save_path
+    print "train over!"
 
-
-    # evaluate on test set
-    print "evaluating loss on test data"
-    test_data = load_data(FLAGS.test_path, word_to_index)
-    steps_test = len(test_data) // FLAGS.batch_size
-    avg_test_cost = 0
-    labels = []
-    probs = []
-
-    for step in range(steps_test):
-      batch_data_test = test_data[FLAGS.batch_size * step: FLAGS.batch_size * (step + 1)]
-      batch_context_test = [x[0] for x in batch_data_test]
-      batch_utterance_test = [x[1] for x in batch_data_test]
-      batch_target_test = [x[3] for x in batch_data_test]
-      batch_context_test_len = [x[2][0] for x in batch_data_test]
-      batch_utterance_test_len = [x[2][1] for x in batch_data_test]
-      c = sess.run([data_model.losses], feed_dict={
-        data_model.input_context: batch_context_test,
-        data_model.input_utterance: batch_utterance_test,
-        data_model.target: batch_target_test,
-        data_model.context_len: batch_context_test_len,
-        data_model.utterance_len: batch_utterance_test_len,
-        data_model.is_training: False
-      })
-      labels.append(batch_target_test)
-      probs.append(prob)
-      avg_test_cost += c
-    avg_test_cost /= steps_test
-    labels = np.array(labels).reshape(-1)
-    probs = np.array(probs).reshape(-1)
-    auc = metrics.roc_auc_score(labels, probs)
-    predication = [1 if s >= 0.5 else 0 for s in probs]
-    accuracy = metrics.accuracy_score(labels, predication)
-    f1 = metrics.f1_score(labels, predication)
-    print "*** on test loss: %f, auc: %f, acc: %f, f1: %f ***" % (avg_test_cost, auc, accuracy, f1)
-    logging.info("*** on test loss: %f, auc: %f, acc: %f, f1: %f ***" % (avg_test_cost, auc, accuracy, f1))
+    # # evaluate on test set
+    # print "evaluating loss on test data"
+    # test_data = load_data(FLAGS.test_path, word_to_index)
+    # steps_test = len(test_data) // FLAGS.batch_size
+    # avg_test_cost = 0
+    # labels = []
+    # probs = []
+		#
+    # for step in range(steps_test):
+    #   batch_data_test = test_data[FLAGS.batch_size * step: FLAGS.batch_size * (step + 1)]
+    #   batch_context_test = [x[0] for x in batch_data_test]
+    #   batch_utterance_test = [x[1] for x in batch_data_test]
+    #   batch_target_test = [x[3] for x in batch_data_test]
+    #   batch_context_test_len = [x[2][0] for x in batch_data_test]
+    #   batch_utterance_test_len = [x[2][1] for x in batch_data_test]
+    #   c = sess.run([data_model.losses], feed_dict={
+    #     data_model.input_context: batch_context_test,
+    #     data_model.input_utterance: batch_utterance_test,
+    #     data_model.target: batch_target_test,
+    #     data_model.context_len: batch_context_test_len,
+    #     data_model.utterance_len: batch_utterance_test_len,
+    #     data_model.is_training: False
+    #   })
+    #   labels.append(batch_target_test)
+    #   probs.append(prob)
+    #   avg_test_cost += c
+    # avg_test_cost /= steps_test
+    # labels = np.array(labels).reshape(-1)
+    # probs = np.array(probs).reshape(-1)
+    # auc = metrics.roc_auc_score(labels, probs)
+    # predication = [1 if s >= 0.5 else 0 for s in probs]
+    # accuracy = metrics.accuracy_score(labels, predication)
+    # f1 = metrics.f1_score(labels, predication)
+    # print "*** on test loss: %f, auc: %f, acc: %f, f1: %f ***" % (avg_test_cost, auc, accuracy, f1)
+    # logging.info("*** on test loss: %f, auc: %f, acc: %f, f1: %f ***" % (avg_test_cost, auc, accuracy, f1))
 
 if __name__ == "__main__":
   tf.app.run()
